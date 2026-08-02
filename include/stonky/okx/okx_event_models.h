@@ -17,6 +17,9 @@ namespace stonky::okx {
 struct WSSubscription final : IJson {
     std::string channel{};
     std::string instId{};
+    /// Private channels (orders, positions, account) key off instType
+    /// ("FUTURES", "SWAP", "ANY"), not instId.
+    std::string instType{};
 
     [[nodiscard]] nlohmann::json toJson() const override;
 

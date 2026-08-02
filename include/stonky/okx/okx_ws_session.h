@@ -33,8 +33,15 @@ public:
      * @param port
      * @param subscriptionRequest Must not be empty
      * @param dataEventCB Data Message callback
+     * @param path WebSocket path — "/ws/v5/public" (default) or "/ws/v5/private".
+     * @param loginRequest Serialized OKX login op. When non-empty the session is
+     *        treated as PRIVATE: the login is written first and subscriptions are
+     *        only sent once the venue acknowledges it. A private session also does
+     *        NOT self-close while it holds no subscriptions, because it is legitimately
+     *        idle between the login ack and the first subscribe.
      */
-    void run(const std::string &host, const std::string &port, const std::string &subscriptionRequest, const onDataEvent &dataEventCB);
+    void run(const std::string &host, const std::string &port, const std::string &subscriptionRequest, const onDataEvent &dataEventCB,
+             const std::string &path = "/ws/v5/public", const std::string &loginRequest = "");
 
     /**
      * Close the session asynchronously

@@ -302,7 +302,10 @@ void Position::fromJson(const nlohmann::json &json) {
     std::string side;
     readValue<std::string>(json, "posSide", side);
 
-    if (const auto posSideVal = magic_enum::enum_cast<PositionSide>(side)) {
+    /// The venue spells these "net"/"long"/"short" while the enum members carry a
+    /// leading underscore (to dodge the `long` keyword), so a direct enum_cast
+    /// never matched and posSide silently stayed at its default.
+    if (const auto posSideVal = magic_enum::enum_cast<PositionSide>("_" + side)) {
         posSide = *posSideVal;
     }
 
@@ -330,12 +333,17 @@ void Positions::fromJson(const nlohmann::json &json) {
 nlohmann::json Order::toJson() const {
     nlohmann::json json;
     json["instId"] = instId;
-    json["tdMode"] = tdMode;
+    /// Every enum must go out as its NAME. A plain enum serializes to its
+    /// underlying integer, which the venue rejects — tdMode/side/ordType were
+    /// all doing that, so no order could ever have been accepted.
+    json["tdMode"] = magic_enum::enum_name(tdMode);
     json["clOrdId"] = clOrdId;
     json["ccy"] = ccy;
-    json["side"] = side;
-    json["posSide"] = magic_enum::enum_name(posSide);
-    json["ordType"] = ordType;
+    json["side"] = magic_enum::enum_name(side);
+    /// PositionSide members carry a leading underscore to dodge the `long`
+    /// keyword; the venue wants them without it.
+    json["posSide"] = std::string(magic_enum::enum_name(posSide)).substr(1);
+    json["ordType"] = magic_enum::enum_name(ordType);
     json["sz"] = sz.str();
     // str(0) = shortest representation that round-trips exactly. str(N>0) means N
     // SIGNIFICANT DIGITS, which silently mangled every realistic price:

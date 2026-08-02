@@ -9,23 +9,38 @@ Copyright (c) 2025 Vitezslav Kot <vitezslav.kot@stonky.cz>, Stonky s.r.o.
 #include "stonky/okx/okx_event_models.h"
 #include "stonky/utils/utils.h"
 #include "stonky/utils/json_utils.h"
+#include "magic_enum/magic_enum.hpp"
 
 namespace stonky::okx {
 nlohmann::json WSSubscription::toJson() const {
     nlohmann::json json;
     json["channel"] = channel;
-    json["instId"] = instId;
+
+    /// Emit only what this subscription actually keys on — the venue rejects the
+    /// whole request (code 60012) when it carries an empty instId, which is what
+    /// every private-channel subscription would send.
+    if (!instId.empty()) {
+        json["instId"] = instId;
+    }
+    if (!instType.empty()) {
+        json["instType"] = instType;
+    }
+
     return json;
 }
 
 void WSSubscription::fromJson(const nlohmann::json &json) {
     readValue<std::string>(json, "channel", channel);
     readValue<std::string>(json, "instId", instId);
+    readValue<std::string>(json, "instType", instType);
 }
 
 nlohmann::json WSRequest::toJson() const {
     nlohmann::json json;
-    json["op"] = op;
+    /// magic_enum, not the raw enum: nlohmann serializes a plain enum as its
+    /// UNDERLYING INTEGER, so this went out as {"op":0} and the venue rejected
+    /// every subscription — public ones included — with code 60012.
+    json["op"] = magic_enum::enum_name(op);
 
     auto args = nlohmann::json::array();
 
@@ -52,9 +67,15 @@ void WSResponse::fromJson(const nlohmann::json &json) {
     if (event == EventType::error) {
         readValue<std::string>(json, "code", code);
         readValue<std::string>(json, "msg", msg);
-    } else {
-        const auto &arg = json["arg"];
-        subscription.fromJson(arg);
+        return;
+    }
+
+    /// `arg` is NOT universal: private channels also emit bookkeeping events
+    /// such as `channel-conn-count`, which carry no `arg` at all. Reading it
+    /// unconditionally through the CONST operator[] aborted the process on the
+    /// first such message (nlohmann asserts the key exists).
+    if (const auto it = json.find("arg"); it != json.end() && it->is_object()) {
+        subscription.fromJson(*it);
     }
 }
 

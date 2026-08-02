@@ -51,6 +51,7 @@ set(HEADERS
         include/stonky/okx/okx_ws_client.h
         include/stonky/okx/okx_ws_session.h
         include/stonky/okx/okx_ws_stream_manager.h
+        include/stonky/okx/okx_private_stream.h
         include/stonky/okx/okx_futures_exchange_connector.h
         include/stonky/okx/okx_market_data_utils.h
 )
@@ -61,6 +62,7 @@ set(SOURCES
         src/okx_ws_client.cpp
         src/okx_ws_session.cpp
         src/okx_ws_stream_manager.cpp
+        src/okx_private_stream.cpp
         src/okx_models.cpp
         src/okx_rest_client.cpp
         src/okx_http_session.cpp
@@ -78,6 +80,9 @@ option(ENABLE_TESTS "Build okx_api test executables" OFF)
 if (ENABLE_TESTS)
     add_executable(okx_test test/main.cpp)
     target_link_libraries(okx_test PRIVATE spdlog::spdlog_header_only okx_api)
+
+    add_executable(private_stream_smoke test/private_stream_smoke.cpp)
+    target_link_libraries(private_stream_smoke PRIVATE spdlog::spdlog_header_only okx_api)
 endif ()
 
 target_link_libraries(okx_api PRIVATE spdlog::spdlog_header_only OpenSSL::Crypto OpenSSL::SSL stonky_common nlohmann_json::nlohmann_json MINIZIP::minizip)

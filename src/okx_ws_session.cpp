@@ -26,6 +26,11 @@ struct WebSocketSession::P {
     boost::beast::websocket::stream<boost::beast::ssl_stream<boost::beast::tcp_stream>> ws;
     boost::beast::multi_buffer buffer;
     std::string host;
+    std::string wsPath{"/ws/v5/public"};
+    /// Non-empty => private session: login first, subscribe only after the ack.
+    std::string loginRequest;
+    bool loginSent{false};
+    bool authenticated{false};
     std::vector<std::string> subscriptions;
     std::string subscriptionRequest;
     onLogMessage logMessageCB;
@@ -71,6 +76,27 @@ struct WebSocketSession::P {
 
     void handleControlEvent(const nlohmann::json &json) {
         std::lock_guard lk(subscriptionLocker);
+
+        /// Handled on the raw json: EventType has no `login` member, and letting
+        /// WSResponse parse an unknown event would throw.
+        /// Bookkeeping events carry neither a subscription nor an error; they
+        /// must not be mistaken for a subscribe ack (EventType has no member for
+        /// them, so readMagicEnum would leave the default and mis-record one).
+        if (const auto event = json.value("event", ""); event == "channel-conn-count" || event == "channel-conn-count-error" || event == "notice") {
+            logMessageCB(LogSeverity::Info, fmt::format("OKX WebSocket notice: {}", json.dump()));
+            return;
+        }
+
+        if (json.value("event", "") == "login") {
+            const auto code = json.value("code", "");
+            authenticated = code == "0";
+            if (authenticated) {
+                logMessageCB(LogSeverity::Info, "OKX WebSocket authenticated");
+            } else {
+                logMessageCB(LogSeverity::Error, fmt::format("OKX WebSocket login failed, code: {}, message: {}", code, json.value("msg", "")));
+            }
+            return;
+        }
 
         WSResponse wsResponse;
         wsResponse.fromJson(json);
@@ -138,7 +164,7 @@ struct WebSocketSession::P {
         ws.set_option(boost::beast::websocket::stream_base::decorator(
                 [](boost::beast::websocket::request_type &req) { req.set(boost::beast::http::field::user_agent, std::string(BOOST_BEAST_VERSION_STRING) + " okx-client"); }));
 
-        ws.async_handshake(host, "/ws/v5/public", [this, self](const boost::system::error_code &e) { onHandshake(self, e); });
+        ws.async_handshake(host, wsPath, [this, self](const boost::system::error_code &e) { onHandshake(self, e); });
     }
 
     void onHandshake(const std::shared_ptr<WebSocketSession> &self, const boost::system::error_code &ec) {
@@ -147,6 +173,16 @@ struct WebSocketSession::P {
         }
 
         pingTimer.async_wait([this, self](const boost::system::error_code &e) { onPingTimer(self, e); });
+
+        /// A private session must authenticate before the venue accepts any
+        /// subscription; the queued subscription is written once the login is
+        /// acknowledged (see handleControlEvent / onRead).
+        if (!loginRequest.empty() && !loginSent) {
+            loginSent = true;
+            ws.async_write(boost::asio::buffer(loginRequest),
+                             [this, self](const boost::system::error_code &e, const std::size_t bytesTransferred) { onWrite(self, e, bytesTransferred); });
+            return;
+        }
 
         ws.async_write(boost::asio::buffer(readSubscriptionRequest()),
                          [this, self](const boost::system::error_code &e, const std::size_t bytesTransferred) { onWrite(self, e, bytesTransferred); });
@@ -203,7 +239,10 @@ struct WebSocketSession::P {
                                  [this, self](const boost::system::error_code &e, const std::size_t transferred) { onWrite(self, e, transferred); });
             } else {
                 std::lock_guard lk(subscriptionLocker);
-                if (subscriptions.empty()) {
+                /// A private session is legitimately subscription-less between the
+                /// login ack and its first subscribe, and its owner may keep it open
+                /// with none at all — only public sessions quit when idle.
+                if (subscriptions.empty() && loginRequest.empty()) {
                     logMessageCB(LogSeverity::Warning, fmt::format("No subscriptions, WebSocketSession quit: {}", MAKE_FILELINE));
                     closeWs();
                 }
@@ -280,12 +319,15 @@ void WebSocketSession::subscribe(const std::string &subscriptionRequest) const {
 
 bool WebSocketSession::isSubscribed(const std::string &subscriptionRequest) const { return m_p->isSubscribed(subscriptionRequest); }
 
-void WebSocketSession::run(const std::string &host, const std::string &port, const std::string &subscriptionRequest, const onDataEvent &dataEventCB) {
+void WebSocketSession::run(const std::string &host, const std::string &port, const std::string &subscriptionRequest, const onDataEvent &dataEventCB,
+                           const std::string &path, const std::string &loginRequest) {
     if (subscriptionRequest.empty()) {
         throw std::runtime_error("SubscriptionRequest cannot be empty");
     }
 
     m_p->host = host;
+    m_p->wsPath = path;
+    m_p->loginRequest = loginRequest;
     m_p->writeSubscriptionRequest(subscriptionRequest);
     m_p->dataEventCB = dataEventCB;
 

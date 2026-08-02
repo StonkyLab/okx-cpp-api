@@ -49,6 +49,21 @@ public:
     void setDataEventCallback(const onDataEvent &onDataEventCB) const;
 
     /**
+     * Override the endpoint. An OKX account belongs to ONE entity, and the WS
+     * host must match it — see OKX::WS_HOST_GLOBAL / WS_HOST_EEA. Must be called
+     * before the first subscribe.
+     */
+    void setEndpoint(const std::string &host, const std::string &port) const;
+
+    /**
+     * Turn this client into a PRIVATE (authenticated) one. Must be called before
+     * the first subscribe: the session logs in on connect and only then sends
+     * subscriptions.
+     * @param loginRequest serialized OKX `login` op
+     */
+    void setPrivateAuth(const std::string &loginRequest) const;
+
+    /**
      * Subscribe WebSocket according to the subscriptionRequest
      * @param subscriptionRequest
      */
