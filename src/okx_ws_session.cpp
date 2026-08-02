@@ -7,6 +7,7 @@ Copyright (c) 2025 Vitezslav Kot <vitezslav.kot@stonky.cz>, Stonky s.r.o.
 */
 
 #include "stonky/okx/okx_ws_session.h"
+#include <deque>
 #include "stonky/utils/log_utils.h"
 #include "stonky/utils/json_utils.h"
 #include <nlohmann/json.hpp>
@@ -32,7 +33,10 @@ struct WebSocketSession::P {
     bool loginSent{false};
     bool authenticated{false};
     std::vector<std::string> subscriptions;
-    std::string subscriptionRequest;
+    /// PENDING subscriptions, in arrival order. This was a single slot, so
+    /// subscribing to several symbols in a row silently dropped all but the
+    /// last: each call overwrote the previous before the io loop could send it.
+    std::deque<std::string> pendingSubscriptions;
     onLogMessage logMessageCB;
     onDataEvent dataEventCB;
     boost::asio::steady_timer pingTimer;
@@ -52,24 +56,30 @@ struct WebSocketSession::P {
             }
         }
 
-        this->subscriptionRequest = request;
+        for (const auto &rq: pendingSubscriptions) {
+            if (rq == request) {
+                return;
+            }
+        }
+
+        pendingSubscriptions.push_back(request);
     }
 
     std::string readSubscriptionRequest() {
         std::lock_guard lk(subscriptionLocker);
 
-        if (subscriptionRequest.empty()) {
+        if (pendingSubscriptions.empty()) {
             return "";
         }
 
+        const auto request = pendingSubscriptions.front();
+        pendingSubscriptions.pop_front();
+
         WSRequest wsRequest;
         WSSubscription wsSubscription;
-        wsSubscription.fromJson(nlohmann::json::parse(subscriptionRequest));
+        wsSubscription.fromJson(nlohmann::json::parse(request));
         wsRequest.subscriptions.push_back(wsSubscription);
-        std::string retVal = wsRequest.toJson().dump();
-
-        subscriptionRequest.clear();
-        return retVal;
+        return wsRequest.toJson().dump();
     }
 
     static bool isControlEvent(const nlohmann::json &json) { return json.contains("event"); }
@@ -242,7 +252,7 @@ struct WebSocketSession::P {
                 /// A private session is legitimately subscription-less between the
                 /// login ack and its first subscribe, and its owner may keep it open
                 /// with none at all — only public sessions quit when idle.
-                if (subscriptions.empty() && loginRequest.empty()) {
+                if (subscriptions.empty() && pendingSubscriptions.empty() && loginRequest.empty()) {
                     logMessageCB(LogSeverity::Warning, fmt::format("No subscriptions, WebSocketSession quit: {}", MAKE_FILELINE));
                     closeWs();
                 }
