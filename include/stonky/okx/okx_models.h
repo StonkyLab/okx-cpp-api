@@ -360,6 +360,11 @@ struct Order final : IJson {
     OrderType ordType{OrderType::market};
     boost::multiprecision::cpp_dec_float_50 sz{};
     boost::multiprecision::cpp_dec_float_50 px{};
+    /// Close-only order: the venue rejects it if it would open or increase a
+    /// position. Required by any hedged strategy whose unwind must never flip a
+    /// leg. Serialized only when set — sending it on an unsupported combination
+    /// is itself a reject.
+    bool reduceOnly{false};
 
     [[nodiscard]] nlohmann::json toJson() const override;
 

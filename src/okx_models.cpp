@@ -337,7 +337,17 @@ nlohmann::json Order::toJson() const {
     json["posSide"] = magic_enum::enum_name(posSide);
     json["ordType"] = ordType;
     json["sz"] = sz.str();
-    json["px"] = px.str(3);
+    // str(0) = shortest representation that round-trips exactly. str(N>0) means N
+    // SIGNIFICANT DIGITS, which silently mangled every realistic price:
+    //   63860.4 -> "6.39e+04"  (scientific notation, rejected by the venue)
+    //   96.4123 -> "96.4"      (truncated below the instrument tick)
+    // Rounding a price to the instrument tick is the CALLER's job; this
+    // serializer must reproduce exactly what the caller asked for.
+    json["px"] = px.str(0);
+
+    if (reduceOnly) {
+        json["reduceOnly"] = true;
+    }
 
     return json;
 }

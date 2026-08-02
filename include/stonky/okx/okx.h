@@ -12,6 +12,25 @@ Copyright (c) 2025 Vitezslav Kot <vitezslav.kot@stonky.cz>, Stonky s.r.o.
 #include "stonky/okx/okx_models.h"
 
 namespace stonky::okx {
+
+/**
+ * API hosts. OKX runs separate legal ENTITIES on separate hosts and an account
+ * exists on exactly one of them — a key issued on the EEA entity answers
+ * "API key doesn't exist" (code 50119) against the global host, so the host is
+ * part of an account's identity, not a mirror to pick freely.
+ *
+ * The public instrument catalogs are identical across hosts, but TRADEABILITY is
+ * not: on the EEA entity (verified 2026-08-02) GET /api/v5/account/instruments
+ * returns 100 live FUTURES, all of them ruleType "xperp", and ZERO SWAP — an EEA
+ * account trades USD-settled X-Perps instead of USDT swaps.
+ */
+constexpr auto API_HOST_GLOBAL = "www.okx.com";
+constexpr auto API_HOST_EEA = "eea.okx.com";
+
+/// WebSocket hosts, matching the REST entities above.
+constexpr auto WS_HOST_GLOBAL = "ws.okx.com";
+constexpr auto WS_HOST_EEA = "wseea.okx.com";
+
 class OKX {
 public:
     /**

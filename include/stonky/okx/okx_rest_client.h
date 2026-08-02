@@ -22,7 +22,8 @@ class RESTClient {
     std::unique_ptr<P> m_p{};
 
 public:
-    RESTClient(const std::string &apiKey, const std::string &apiSecret, const std::string &passphrase);
+    /// @param host see HTTPSession — empty selects the global host.
+    RESTClient(const std::string &apiKey, const std::string &apiSecret, const std::string &passphrase, const std::string &host = "");
 
     ~RESTClient();
 
@@ -32,7 +33,7 @@ public:
      * @param apiSecret
      * @param passphrase
      */
-    void setCredentials(const std::string &apiKey, const std::string &apiSecret, const std::string &passphrase) const;
+    void setCredentials(const std::string &apiKey, const std::string &apiSecret, const std::string &passphrase, const std::string &host = "") const;
 
     /**
      * Retrieve the latest price snapshot, best bid/ask price, and trading volume in the last 24 hours.

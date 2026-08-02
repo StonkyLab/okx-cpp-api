@@ -26,7 +26,11 @@ class HTTPSession {
     std::unique_ptr<P> m_p{};
 
 public:
-    HTTPSession(const std::string &apiKey, const std::string &apiSecret, const std::string &passphrase);
+    /**
+     * @param host API host. An OKX account exists on exactly ONE entity/host —
+     *        see OKX::API_HOST_GLOBAL / API_HOST_EEA. Empty selects the global host.
+     */
+    HTTPSession(const std::string &apiKey, const std::string &apiSecret, const std::string &passphrase, const std::string &host = "");
 
     ~HTTPSession();
 

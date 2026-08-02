@@ -107,15 +107,15 @@ public:
     std::vector<FundingRate> getFundingRates(const std::string &instId, int64_t from, int64_t to, int limit) const;
 };
 
-RESTClient::RESTClient(const std::string &apiKey, const std::string &apiSecret, const std::string &passphrase) : m_p(std::make_unique<P>(this)) {
-    m_p->httpSession = std::make_shared<HTTPSession>(apiKey, apiSecret, passphrase);
+RESTClient::RESTClient(const std::string &apiKey, const std::string &apiSecret, const std::string &passphrase, const std::string &host) : m_p(std::make_unique<P>(this)) {
+    m_p->httpSession = std::make_shared<HTTPSession>(apiKey, apiSecret, passphrase, host);
 }
 
 RESTClient::~RESTClient() = default;
 
-void RESTClient::setCredentials(const std::string &apiKey, const std::string &apiSecret, const std::string &passphrase) const {
+void RESTClient::setCredentials(const std::string &apiKey, const std::string &apiSecret, const std::string &passphrase, const std::string &host) const {
     m_p->httpSession.reset();
-    m_p->httpSession = std::make_shared<HTTPSession>(apiKey, apiSecret, passphrase);
+    m_p->httpSession = std::make_shared<HTTPSession>(apiKey, apiSecret, passphrase, host);
 }
 
 std::vector<Ticker> RESTClient::getTickers(const InstrumentType instrumentType) const {
