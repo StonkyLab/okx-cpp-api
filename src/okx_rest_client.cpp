@@ -313,6 +313,38 @@ std::vector<OrderResponse> RESTClient::placeOrder(const Order &order) const {
     return handleOKXResponse<OrderResponses>(response).orderResponses;
 }
 
+std::vector<LeverageSetting> RESTClient::setLeverage(const std::string &instId, const double leverage, const MarginMode marginMode,
+                                                      const PositionSide positionSide) const {
+    const std::string path = "/api/v5/account/set-leverage";
+
+    nlohmann::json body;
+    body["instId"] = instId;
+    /// The venue takes every numeric field as a string.
+    body["lever"] = fmt::format("{:g}", leverage);
+    body["mgnMode"] = magic_enum::enum_name(marginMode);
+
+    /// posSide applies to long/short position mode only — sending it in net
+    /// mode is itself a parameter error. The enum's leading underscore is a
+    /// C++ keyword workaround and must be stripped for the venue.
+    if (positionSide != PositionSide::_net) {
+        body["posSide"] = std::string(magic_enum::enum_name(positionSide)).substr(1);
+    }
+
+    const auto response = P::checkResponse(m_p->httpSession->post(path, body, false));
+    return handleOKXResponse<LeverageSettings>(response).settings;
+}
+
+std::vector<LeverageSetting> RESTClient::getLeverage(const std::string &instId, const MarginMode marginMode) const {
+    const std::string path = "/api/v5/account/leverage-info";
+    std::map<std::string, std::string> parameters;
+
+    parameters.insert_or_assign("instId", instId);
+    parameters.insert_or_assign("mgnMode", std::string(magic_enum::enum_name(marginMode)));
+
+    const auto response = P::checkResponse(m_p->httpSession->get(path, parameters, false));
+    return handleOKXResponse<LeverageSettings>(response).settings;
+}
+
 std::vector<OrderDetail> RESTClient::getOrderDetail(const std::string &instId, const std::string &clientOrderId, const std::string &orderId) const {
     const std::string path = "/api/v5/trade/order";
     std::map<std::string, std::string> parameters;

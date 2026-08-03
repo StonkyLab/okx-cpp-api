@@ -22,6 +22,7 @@ Copyright (c) 2026 Vitezslav Kot <vitezslav.kot@stonky.cz>, Stonky s.r.o.
 #include "stonky/okx/okx_execution_gateway.h"
 #include "stonky/okx/okx_rest_client.h"
 #include <spdlog/spdlog.h>
+#include "magic_enum/magic_enum.hpp"
 #include <chrono>
 #include <fstream>
 #include <map>
@@ -136,6 +137,21 @@ int main(const int argc, char **argv) {
             spdlog::info("  {:<6} {:>3} events, 30d cum {:+.4f}%", symbol, rates.size(), cum * 100.0);
         } catch (std::exception &e) {
             spdlog::warn("  {:<6} funding read failed: {}", symbol, e.what());
+        }
+    }
+
+    spdlog::info("--- leverage (read path shares the model with setLeverage) ---");
+    for (const auto &symbol: symbols) {
+        const auto instId = gateway.instIdFor(symbol);
+        if (instId.empty()) {
+            continue;
+        }
+        try {
+            for (const auto &setting: rest.getLeverage(instId, stonky::okx::MarginMode::cross)) {
+                spdlog::info("  {:<6} lever {:g} mgnMode {}", symbol, setting.lever.convert_to<double>(), magic_enum::enum_name(setting.mgnMode));
+            }
+        } catch (std::exception &e) {
+            spdlog::warn("  {:<6} leverage read failed: {}", symbol, e.what());
         }
     }
 

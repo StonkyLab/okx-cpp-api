@@ -392,6 +392,36 @@ void OrderResponses::fromJson(const nlohmann::json &json) {
     }
 }
 
+nlohmann::json LeverageSetting::toJson() const { throw std::runtime_error("Unimplemented: LeverageSetting::toJson()"); }
+
+void LeverageSetting::fromJson(const nlohmann::json &json) {
+    readValue<std::string>(json, "instId", instId);
+    readValue<std::string>(json, "ccy", ccy);
+    readDecimalValue(json, "lever", lever);
+    readMagicEnum<MarginMode>(json, "mgnMode", mgnMode);
+
+    std::string side;
+    readValue<std::string>(json, "posSide", side);
+
+    /// The venue spells these "net"/"long"/"short"; the enum members carry a
+    /// leading underscore to dodge the `long` keyword.
+    if (const auto posSideVal = magic_enum::enum_cast<PositionSide>("_" + side)) {
+        posSide = *posSideVal;
+    }
+}
+
+nlohmann::json LeverageSettings::toJson() const { throw std::runtime_error("Unimplemented: LeverageSettings::toJson()"); }
+
+void LeverageSettings::fromJson(const nlohmann::json &json) {
+    Response::fromJson(json);
+
+    for (const auto &el: data.items()) {
+        LeverageSetting setting;
+        setting.fromJson(el.value());
+        settings.push_back(setting);
+    }
+}
+
 nlohmann::json OrderDetail::toJson() const {
     throw std::runtime_error("Unimplemented: OrderDetail::toJson()");
 }

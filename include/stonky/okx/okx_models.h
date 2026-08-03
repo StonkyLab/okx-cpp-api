@@ -391,6 +391,27 @@ struct OrderResponses final : Response {
     void fromJson(const nlohmann::json &json) override;
 };
 
+/// Result of a leverage change, echoed back by the venue.
+struct LeverageSetting final : IJson {
+    std::string instId{};
+    std::string ccy{};
+    boost::multiprecision::cpp_dec_float_50 lever{};
+    MarginMode mgnMode{MarginMode::cross};
+    PositionSide posSide{PositionSide::_net};
+
+    [[nodiscard]] nlohmann::json toJson() const override;
+
+    void fromJson(const nlohmann::json &json) override;
+};
+
+struct LeverageSettings final : Response {
+    std::vector<LeverageSetting> settings{};
+
+    [[nodiscard]] nlohmann::json toJson() const override;
+
+    void fromJson(const nlohmann::json &json) override;
+};
+
 struct OrderDetail final : IJson {
     InstrumentType instType{InstrumentType::MARGIN};
     std::string instId{};

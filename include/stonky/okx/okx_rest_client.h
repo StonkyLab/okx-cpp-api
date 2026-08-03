@@ -136,6 +136,31 @@ public:
     [[nodiscard]] std::vector<OrderResponse> placeOrder(const Order &order) const;
 
     /**
+     * Set the leverage of ONE instrument.
+     *
+     * The venue offers no account-wide or per-currency shortcut for X-Perps —
+     * leverage-info rejects a ccy-only query with "Parameter instId can not be
+     * empty" — so applying a house default across a universe means calling this
+     * per instrument. It is idempotent, so re-applying costs nothing.
+     *
+     * Leverage does NOT size a position; it sets the margin a given notional
+     * consumes. A hedged strategy is sized by the operator and only needs
+     * enough leverage for its book to fit the account's equity.
+     *
+     * @param instId instrument Id, e.g. "BTC-USD_UM_XPERP-310404"
+     * @param leverage new leverage, e.g. 3
+     * @param marginMode cross or isolated
+     * @param positionSide only meaningful in long/short position mode; the
+     *        venue rejects it in net mode, so it is sent only when not `net`
+     * @return the venue's echo of the applied setting
+     */
+    [[nodiscard]] std::vector<LeverageSetting>
+    setLeverage(const std::string &instId, double leverage, MarginMode marginMode = MarginMode::cross, PositionSide positionSide = PositionSide::_net) const;
+
+    /// Current leverage of an instrument, as configured for `marginMode`.
+    [[nodiscard]] std::vector<LeverageSetting> getLeverage(const std::string &instId, MarginMode marginMode = MarginMode::cross) const;
+
+    /**
      * Retrieve order details.
      * @param instId instrument Id, e.g. "ETH-USDT-SWAP"
      * @param clientOrderId Client Order ID as assigned by the client
