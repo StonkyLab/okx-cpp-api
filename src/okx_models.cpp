@@ -7,6 +7,7 @@ Copyright (c) 2025 Vitezslav Kot <vitezslav.kot@stonky.cz>, Stonky s.r.o.
 */
 
 #include "stonky/okx/okx_models.h"
+#include "stonky/okx/okx.h"
 #include "stonky/utils/utils.h"
 #include "stonky/utils/json_utils.h"
 #include <boost/multiprecision/cpp_dec_float.hpp>
@@ -344,14 +345,13 @@ nlohmann::json Order::toJson() const {
     /// keyword; the venue wants them without it.
     json["posSide"] = std::string(magic_enum::enum_name(posSide)).substr(1);
     json["ordType"] = magic_enum::enum_name(ordType);
-    json["sz"] = sz.str();
-    // str(0) = shortest representation that round-trips exactly. str(N>0) means N
-    // SIGNIFICANT DIGITS, which silently mangled every realistic price:
-    //   63860.4 -> "6.39e+04"  (scientific notation, rejected by the venue)
-    //   96.4123 -> "96.4"      (truncated below the instrument tick)
-    // Rounding a price to the instrument tick is the CALLER's job; this
-    // serializer must reproduce exactly what the caller asked for.
-    json["px"] = px.str(0);
+    // OKX::decimalToString, never Boost's str(): str(N>0) means N SIGNIFICANT
+    // DIGITS (63860.4 -> "6.39e+04", 96.4123 -> "96.4"), and even str(0) goes
+    // SCIENTIFIC below 1e-4 (0.00004123 -> "4.123e-05") — both venue-rejected.
+    // Rounding to the instrument's tick/lot stays the CALLER's job; this
+    // serializer reproduces the value exactly, in fixed notation.
+    json["sz"] = OKX::decimalToString(sz);
+    json["px"] = OKX::decimalToString(px);
 
     if (reduceOnly) {
         json["reduceOnly"] = true;

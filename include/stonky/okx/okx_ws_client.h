@@ -12,6 +12,7 @@ Copyright (c) 2025 Vitezslav Kot <vitezslav.kot@stonky.cz>, Stonky s.r.o.
 #include <stonky/utils/log_utils.h>
 #include "okx_ws_session.h"
 #include <string>
+#include <functional>
 
 namespace stonky::okx {
 class WebSocketClient {
@@ -57,11 +58,13 @@ public:
 
     /**
      * Turn this client into a PRIVATE (authenticated) one. Must be called before
-     * the first subscribe: the session logs in on connect and only then sends
-     * subscriptions.
-     * @param loginRequest serialized OKX `login` op
+     * the first subscribe: every (re)connected session logs in first and only
+     * then sends subscriptions.
+     * @param loginProvider invoked at each handshake — the login signature
+     *        embeds a timestamp the venue rejects after ~30 s, so a stored
+     *        request cannot survive a reconnect
      */
-    void setPrivateAuth(const std::string &loginRequest) const;
+    void setPrivateAuth(const std::function<std::string()> &loginProvider) const;
 
     /**
      * Subscribe WebSocket according to the subscriptionRequest

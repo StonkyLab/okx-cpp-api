@@ -76,6 +76,17 @@ public:
 
     void submitReduceOnlyMarket(const std::string &clientOrderId, const std::string &symbol, OrderSide side, double qty) override;
 
+    /**
+     * Re-assert the private order stream. A no-op while the stream is healthy;
+     * after a WebSocket drop it recreates the session, which re-authenticates
+     * (fresh login signature) and re-subscribes. The session has no internal
+     * reconnect loop, so WITHOUT a periodic call a single overnight drop
+     * silently ends fill delivery until process restart. Call it from the
+     * strategy's per-cycle refresh, mirroring how quote subscriptions already
+     * self-heal through the chase core's per-leg subscribeQuotes.
+     */
+    void ensureOrderStream();
+
     /// Resolve a base symbol to the venue instId, for callers that must talk to
     /// REST directly (position/funding queries). Empty when unknown.
     [[nodiscard]] std::string instIdFor(const std::string &symbol) const;

@@ -33,7 +33,7 @@ struct WebSocketClient::P {
     onLogMessage logMessageCB;
     onDataEvent dataEventCB;
     std::string wsPath{"/ws/v5/public"};
-    std::string loginRequest;
+    std::function<std::string()> loginProvider;
 
     P() : ctx(boost::asio::ssl::context::sslv23_client) {
     }
@@ -96,9 +96,9 @@ void WebSocketClient::setEndpoint(const std::string &host, const std::string &po
     m_p->port = port;
 }
 
-void WebSocketClient::setPrivateAuth(const std::string &loginRequest) const {
+void WebSocketClient::setPrivateAuth(const std::function<std::string()> &loginProvider) const {
     m_p->wsPath = "/ws/v5/private";
-    m_p->loginRequest = loginRequest;
+    m_p->loginProvider = loginProvider;
 }
 
 void WebSocketClient::subscribe(const std::string &subscriptionRequest) const {
@@ -110,7 +110,7 @@ void WebSocketClient::subscribe(const std::string &subscriptionRequest) const {
     const auto ws = std::make_shared<WebSocketSession>(m_p->ioContext, m_p->ctx, m_p->logMessageCB);
     std::weak_ptr wp{ws};
     m_p->session = std::move(wp);
-    ws->run(m_p->host, m_p->port, subscriptionRequest, m_p->dataEventCB, m_p->wsPath, m_p->loginRequest);
+    ws->run(m_p->host, m_p->port, subscriptionRequest, m_p->dataEventCB, m_p->wsPath, m_p->loginProvider);
 }
 
 bool WebSocketClient::isSubscribed(const std::string &subscriptionRequest) const {

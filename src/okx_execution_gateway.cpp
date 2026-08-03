@@ -18,6 +18,7 @@ Copyright (c) 2026 Vitezslav Kot <vitezslav.kot@stonky.cz>, Stonky s.r.o.
 #include <mutex>
 #include <set>
 #include <string>
+#include <thread>
 
 namespace stonky::execution {
 using namespace stonky::okx;
@@ -322,6 +323,17 @@ void OkxExecutionGateway::start() {
     m_p->privateStream->setOrderUpdateCallback([this](const DataEvent &event) { m_p->handleOrderEvent(event); });
     m_p->privateStream->subscribeOrders(m_p->instType);
 
+    /// House invariant (same as the Bybit gateway): orders must never be placed
+    /// before fills can be observed. Bounded rather than indefinite — a venue
+    /// hiccup at boot should degrade to a warning, not a dead bot; if auth is
+    /// genuinely broken, order placement fails loudly on its own.
+    for (int i = 0; i < 100 && !m_p->privateStream->isAuthenticated(); ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    if (!m_p->privateStream->isAuthenticated()) {
+        spdlog::warn("OkxExecutionGateway: private stream not authenticated within 10 s — fills may be missed until it recovers");
+    }
+
     m_p->quoteClient->setLoggerCallback([](const LogSeverity severity, const std::string &message) {
         severity == LogSeverity::Error ? spdlog::error("OKX quotes: {}", message) : spdlog::debug("OKX quotes: {}", message);
     });
@@ -483,6 +495,8 @@ void OkxExecutionGateway::submitReduceOnlyMarket(const std::string &clientOrderI
         throw GatewayError(classifyReject(response.sCode, response.sMsg), fmt::format("code {}: {}", response.sCode, response.sMsg));
     }
 }
+
+void OkxExecutionGateway::ensureOrderStream() { m_p->privateStream->subscribeOrders(m_p->instType); }
 
 std::string OkxExecutionGateway::instIdFor(const std::string &symbol) const {
     const auto info = m_p->info(symbol);

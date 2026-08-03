@@ -8,7 +8,26 @@ Copyright (c) 2025 Vitezslav Kot <vitezslav.kot@stonky.cz>, Stonky s.r.o.
 
 #include "stonky/okx/okx.h"
 
+#include <iomanip>
+#include <sstream>
+
 namespace stonky::okx {
+std::string OKX::decimalToString(const boost::multiprecision::cpp_dec_float_50 &value) {
+    std::ostringstream stream;
+    /// 12 fixed decimals cover every tick the venue lists (finest observed:
+    /// 1e-5 on X-Perps, 1e-8 class on SWAP long tail) with room to spare.
+    stream << std::fixed << std::setprecision(12) << value;
+    auto out = stream.str();
+
+    if (out.find('.') != std::string::npos) {
+        out.erase(out.find_last_not_of('0') + 1);
+        if (!out.empty() && out.back() == '.') {
+            out.pop_back();
+        }
+    }
+    return out;
+}
+
 int64_t OKX::numberOfMsForBarSize(const BarSize size) {
     switch (size) {
         case BarSize::_1m:

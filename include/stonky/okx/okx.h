@@ -34,6 +34,17 @@ constexpr auto WS_HOST_EEA = "wseea.okx.com";
 class OKX {
 public:
     /**
+     * Decimal -> string in FIXED notation, trailing zeros trimmed.
+     *
+     * The venue parses every numeric field as a plain decimal string. Boost's
+     * str(0) ("shortest round-tripping form") switches to SCIENTIFIC notation
+     * below 1e-4 — measured: 0.00004123 -> "4.123e-05" — which the venue
+     * rejects. No X-Perp trades that low today, but SWAP-universe prices do
+     * (SHIB-class), so every order field must go through this instead.
+     */
+    [[nodiscard]] static std::string decimalToString(const boost::multiprecision::cpp_dec_float_50 &value);
+
+    /**
      * Check if the input resolution in minutes is valid, if so then return corresponding API string
      * @param size Bar size in minutes.
      * @param barSize out: BarSize enum value

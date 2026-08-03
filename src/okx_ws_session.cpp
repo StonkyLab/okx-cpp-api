@@ -28,8 +28,11 @@ struct WebSocketSession::P {
     boost::beast::multi_buffer buffer;
     std::string host;
     std::string wsPath{"/ws/v5/public"};
-    /// Non-empty => private session: login first, subscribe only after the ack.
-    std::string loginRequest;
+    /// Set => private session: login first, subscribe only after the ack. A
+    /// PROVIDER, not a stored request — the login signature embeds a timestamp
+    /// the venue rejects after ~30 s, so each (re)connect must sign afresh.
+    std::function<std::string()> loginProvider;
+    std::string loginRequest; ///< the request written on THIS connection
     bool loginSent{false};
     bool authenticated{false};
     std::vector<std::string> subscriptions;
@@ -187,8 +190,9 @@ struct WebSocketSession::P {
         /// A private session must authenticate before the venue accepts any
         /// subscription; the queued subscription is written once the login is
         /// acknowledged (see handleControlEvent / onRead).
-        if (!loginRequest.empty() && !loginSent) {
+        if (loginProvider && !loginSent) {
             loginSent = true;
+            loginRequest = loginProvider();
             ws.async_write(boost::asio::buffer(loginRequest),
                              [this, self](const boost::system::error_code &e, const std::size_t bytesTransferred) { onWrite(self, e, bytesTransferred); });
             return;
@@ -252,7 +256,7 @@ struct WebSocketSession::P {
                 /// A private session is legitimately subscription-less between the
                 /// login ack and its first subscribe, and its owner may keep it open
                 /// with none at all — only public sessions quit when idle.
-                if (subscriptions.empty() && pendingSubscriptions.empty() && loginRequest.empty()) {
+                if (subscriptions.empty() && pendingSubscriptions.empty() && !loginProvider) {
                     logMessageCB(LogSeverity::Warning, fmt::format("No subscriptions, WebSocketSession quit: {}", MAKE_FILELINE));
                     closeWs();
                 }
@@ -330,14 +334,14 @@ void WebSocketSession::subscribe(const std::string &subscriptionRequest) const {
 bool WebSocketSession::isSubscribed(const std::string &subscriptionRequest) const { return m_p->isSubscribed(subscriptionRequest); }
 
 void WebSocketSession::run(const std::string &host, const std::string &port, const std::string &subscriptionRequest, const onDataEvent &dataEventCB,
-                           const std::string &path, const std::string &loginRequest) {
+                           const std::string &path, const std::function<std::string()> &loginProvider) {
     if (subscriptionRequest.empty()) {
         throw std::runtime_error("SubscriptionRequest cannot be empty");
     }
 
     m_p->host = host;
     m_p->wsPath = path;
-    m_p->loginRequest = loginRequest;
+    m_p->loginProvider = loginProvider;
     m_p->writeSubscriptionRequest(subscriptionRequest);
     m_p->dataEventCB = dataEventCB;
 

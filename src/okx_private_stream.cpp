@@ -59,23 +59,21 @@ PrivateStream::PrivateStream(const std::string &apiKey, const std::string &apiSe
     m_p(std::make_unique<P>()) {
     m_p->wsClient = std::make_unique<WebSocketClient>();
     m_p->wsClient->setEndpoint(wsHost.empty() ? WS_HOST_GLOBAL : wsHost, WS_PORT);
-    m_p->wsClient->setPrivateAuth(loginRequestJson(apiKey, apiSecret, passphrase));
+
+    /// A PROVIDER, invoked at every (re)connect: the login signature embeds a
+    /// timestamp the venue rejects after ~30 s, so a request signed at
+    /// construction would fail authentication on any later reconnect.
+    m_p->wsClient->setPrivateAuth([apiKey, apiSecret, passphrase] { return loginRequestJson(apiKey, apiSecret, passphrase); });
 
     m_p->wsClient->setDataEventCallback([this](const DataEvent &event) {
         if (event.channel == "orders" && m_p->orderCB) {
             m_p->orderCB(event);
         }
     });
-}
 
-PrivateStream::~PrivateStream() = default;
-
-void PrivateStream::setLoggerCallback(const onLogMessage &onLogMessageCB) const {
-    m_p->logMessageCB = onLogMessageCB;
-
-    /// The session reports its login result through the logger; mirror it into
-    /// `authenticated` so a caller can gate order submission on a real ack
-    /// instead of a sleep.
+    /// The auth sniffer must live independently of the OPTIONAL user logger:
+    /// isAuthenticated() gates order flow, and tying it to whether a logger was
+    /// installed made auth tracking a silent side effect of logging.
     m_p->wsClient->setLoggerCallback([this](const LogSeverity severity, const std::string &message) {
         if (message.find("WebSocket authenticated") != std::string::npos) {
             m_p->authenticated = true;
@@ -88,6 +86,10 @@ void PrivateStream::setLoggerCallback(const onLogMessage &onLogMessageCB) const 
         }
     });
 }
+
+PrivateStream::~PrivateStream() = default;
+
+void PrivateStream::setLoggerCallback(const onLogMessage &onLogMessageCB) const { m_p->logMessageCB = onLogMessageCB; }
 
 void PrivateStream::setOrderUpdateCallback(const onDataEvent &cb) const { m_p->orderCB = cb; }
 

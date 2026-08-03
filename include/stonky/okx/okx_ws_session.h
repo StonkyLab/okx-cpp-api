@@ -14,6 +14,7 @@ Copyright (c) 2025 Vitezslav Kot <vitezslav.kot@stonky.cz>, Stonky s.r.o.
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ssl/context.hpp>
 #include <memory>
+#include <functional>
 
 namespace stonky::okx {
 using onDataEvent = std::function<void(const DataEvent &event)>;
@@ -34,14 +35,17 @@ public:
      * @param subscriptionRequest Must not be empty
      * @param dataEventCB Data Message callback
      * @param path WebSocket path — "/ws/v5/public" (default) or "/ws/v5/private".
-     * @param loginRequest Serialized OKX login op. When non-empty the session is
-     *        treated as PRIVATE: the login is written first and subscriptions are
-     *        only sent once the venue acknowledges it. A private session also does
-     *        NOT self-close while it holds no subscriptions, because it is legitimately
-     *        idle between the login ack and the first subscribe.
+     * @param loginProvider Generator of a serialized OKX login op, invoked AT
+     *        HANDSHAKE TIME. A generator rather than a string because the login
+     *        signature embeds a timestamp the venue rejects after ~30 s — a
+     *        reconnect that replayed a stored request would fail authentication
+     *        forever. When set the session is PRIVATE: the login is written
+     *        first, subscriptions only after the venue acknowledges it, and the
+     *        session does not self-close while it holds no subscriptions
+     *        (legitimately idle between login ack and first subscribe).
      */
     void run(const std::string &host, const std::string &port, const std::string &subscriptionRequest, const onDataEvent &dataEventCB,
-             const std::string &path = "/ws/v5/public", const std::string &loginRequest = "");
+             const std::string &path = "/ws/v5/public", const std::function<std::string()> &loginProvider = {});
 
     /**
      * Close the session asynchronously
