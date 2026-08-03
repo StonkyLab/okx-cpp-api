@@ -20,6 +20,7 @@ Copyright (c) 2026 Vitezslav Kot <vitezslav.kot@stonky.cz>, Stonky s.r.o.
 
 #include "stonky/okx/okx.h"
 #include "stonky/okx/okx_execution_gateway.h"
+#include "stonky/okx/okx_rest_client.h"
 #include <spdlog/spdlog.h>
 #include <chrono>
 #include <fstream>
@@ -112,6 +113,36 @@ int main(const int argc, char **argv) {
         } else {
             spdlog::warn("  {:<6} NO QUOTE", symbol);
         }
+    }
+
+    /// The venue-leg data path: funding history drives the ranking, and its
+    /// units and sign must survive C++ parsing, not just the HTTP round trip.
+    spdlog::info("--- funding history (venue-leg data path) ---");
+    const stonky::okx::RESTClient rest(env.at("API_KEY"), env.at("API_SECRET"), env.at("PASSWORD"), host);
+    const auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    const auto fromMs = nowMs - 30LL * 24 * 3600 * 1000;
+
+    for (const auto &symbol: symbols) {
+        const auto instId = gateway.instIdFor(symbol);
+        if (instId.empty()) {
+            continue;
+        }
+        try {
+            const auto rates = rest.getFundingRates(instId, fromMs, nowMs, 100);
+            double cum = 0.0;
+            for (const auto &rate: rates) {
+                cum += rate.fundingRate.convert_to<double>();
+            }
+            spdlog::info("  {:<6} {:>3} events, 30d cum {:+.4f}%", symbol, rates.size(), cum * 100.0);
+        } catch (std::exception &e) {
+            spdlog::warn("  {:<6} funding read failed: {}", symbol, e.what());
+        }
+    }
+
+    try {
+        spdlog::info("account equity: {:.4f}", rest.getBalance("USD").totalEq.convert_to<double>());
+    } catch (std::exception &e) {
+        spdlog::warn("balance read failed: {}", e.what());
     }
 
     spdlog::info("amend supported: {}", gateway.supportsAmend());
