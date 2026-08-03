@@ -348,9 +348,17 @@ nlohmann::json Order::toJson() const {
         json["ccy"] = ccy;
     }
     json["side"] = magic_enum::enum_name(side);
-    /// PositionSide members carry a leading underscore to dodge the `long`
-    /// keyword; the venue wants them without it.
-    json["posSide"] = std::string(magic_enum::enum_name(posSide)).substr(1);
+
+    /// posSide is sent ONLY in long/short position mode. A net-mode account
+    /// rejects the parameter outright — sCode 51000 "Parameter posSide error"
+    /// on every order of the first live cycle, even with the value "net". The
+    /// same rule already applied to setLeverage; the serializer now matches.
+    /// The members' leading underscore (a `long` keyword workaround) is
+    /// stripped for the wire.
+    if (posSide != PositionSide::_net) {
+        json["posSide"] = std::string(magic_enum::enum_name(posSide)).substr(1);
+    }
+
     json["ordType"] = magic_enum::enum_name(ordType);
     // OKX::decimalToString, never Boost's str(): str(N>0) means N SIGNIFICANT
     // DIGITS (63860.4 -> "6.39e+04", 96.4123 -> "96.4"), and even str(0) goes
