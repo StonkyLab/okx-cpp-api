@@ -24,7 +24,20 @@ ValueType handleOKXResponse(const http::response<http::string_body> &response) {
     retVal.fromJson(nlohmann::json::parse(response.body()));
 
     if (std::stoi(retVal.code) != 0) {
-        throw std::runtime_error(fmt::format("OKX API error, code: {}, msg: {}", retVal.code, retVal.msg).c_str());
+        /// Batch endpoints (order placement/cancel) report failure TWICE: a
+        /// top-level envelope (code "1", msg "All operations failed") and the
+        /// ACTUAL per-order reason inside data[0].sCode/sMsg. Throwing only the
+        /// envelope hid the real error — 20 identical "All operations failed"
+        /// rejects on the first live order, with the actionable code invisible.
+        std::string detail;
+        if (retVal.data.is_array() && !retVal.data.empty()) {
+            const auto &first = retVal.data.front();
+            const auto sCode = first.value("sCode", "");
+            if (!sCode.empty() && sCode != "0") {
+                detail = fmt::format(" [sCode {}: {}]", sCode, first.value("sMsg", ""));
+            }
+        }
+        throw std::runtime_error(fmt::format("OKX API error, code: {}, msg: {}{}", retVal.code, retVal.msg, detail).c_str());
     }
 
     return retVal;

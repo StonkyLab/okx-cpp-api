@@ -102,6 +102,25 @@ OrderState parseState(const std::string &state) {
     return OrderState::Accepted; /// "live"
 }
 
+/**
+ * clOrdId translation. OKX allows ONLY case-sensitive alphanumerics (1-32
+ * chars) in clOrdId, while the chase core's ids are "fa-<hexms>-<hexctr>" —
+ * every order was batch-rejected on the first live cycle because of the
+ * hyphens. The core's ids consist of a lowercase prefix and hex digits, so the
+ * letter 'Z' can never occur in them: replacing '-' with 'Z' on the way out and
+ * back is bijective and needs no lookup table (which would need lifetime
+ * management across reconnect replays).
+ */
+std::string toVenueOrderId(std::string id) {
+    std::ranges::replace(id, '-', 'Z');
+    return id;
+}
+
+std::string fromVenueOrderId(std::string id) {
+    std::ranges::replace(id, 'Z', '-');
+    return id;
+}
+
 double numFromJson(const nlohmann::json &json, const std::string &key) {
     const auto it = json.find(key);
     if (it == json.end() || !it->is_string() || it->get<std::string>().empty()) {
@@ -162,7 +181,7 @@ struct OkxExecutionGateway::P {
                 continue; /// not ours (another strategy on the same account)
             }
 
-            const auto clOrdId = row.value("clOrdId", "");
+            const auto clOrdId = fromVenueOrderId(row.value("clOrdId", ""));
             const auto stateStr = row.value("state", "");
             const auto code = row.value("code", "");
             const auto msg = row.value("msg", "");
@@ -412,7 +431,7 @@ void OkxExecutionGateway::submitPostOnlyLimit(const std::string &clientOrderId, 
     Order order;
     order.instId = info->instId;
     order.tdMode = MarginMode::cross;
-    order.clOrdId = clientOrderId;
+    order.clOrdId = toVenueOrderId(clientOrderId);
     order.side = side == OrderSide::Buy ? Side::buy : Side::sell;
     order.posSide = PositionSide::_net;
     order.ordType = OrderType::post_only;
@@ -447,7 +466,7 @@ bool OkxExecutionGateway::cancel(const std::string &clientOrderId, const std::st
     }
 
     try {
-        const auto responses = m_p->restClient->cancelOrder(info->instId, clientOrderId);
+        const auto responses = m_p->restClient->cancelOrder(info->instId, toVenueOrderId(clientOrderId));
         if (responses.empty()) {
             return false;
         }
@@ -479,7 +498,7 @@ void OkxExecutionGateway::submitReduceOnlyMarket(const std::string &clientOrderI
     Order order;
     order.instId = info->instId;
     order.tdMode = MarginMode::cross;
-    order.clOrdId = clientOrderId;
+    order.clOrdId = toVenueOrderId(clientOrderId);
     order.side = side == OrderSide::Buy ? Side::buy : Side::sell;
     order.posSide = PositionSide::_net;
     order.ordType = OrderType::market;

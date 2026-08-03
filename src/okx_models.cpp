@@ -338,8 +338,15 @@ nlohmann::json Order::toJson() const {
     /// underlying integer, which the venue rejects — tdMode/side/ordType were
     /// all doing that, so no order could ever have been accepted.
     json["tdMode"] = magic_enum::enum_name(tdMode);
-    json["clOrdId"] = clOrdId;
-    json["ccy"] = ccy;
+
+    /// Optional fields are OMITTED when empty — the venue validates present
+    /// keys, and an empty string is a parameter error, not an absence.
+    if (!clOrdId.empty()) {
+        json["clOrdId"] = clOrdId;
+    }
+    if (!ccy.empty()) {
+        json["ccy"] = ccy;
+    }
     json["side"] = magic_enum::enum_name(side);
     /// PositionSide members carry a leading underscore to dodge the `long`
     /// keyword; the venue wants them without it.
