@@ -171,6 +171,7 @@ void Instrument::fromJson(const nlohmann::json &json) {
     readValue<std::string>(json, "ctValCcy", ctValCcy);
     readMagicEnum<OptionType>(json, "optType", optType);
     readDecimalValue(json, "stk", stk);
+    instCategory = static_cast<std::int32_t>(readStringAsInt64(json, "instCategory"));
     listTime = readStringAsInt64(json, "listTime");
     expTime = readStringAsInt64(json, "expTime");
     readDecimalValue(json, "lever", lever);

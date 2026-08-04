@@ -210,6 +210,16 @@ struct Instrument final : IJson {
     /// Alias, only applicable to FUTURES
     FuturesAlias alias = {FuturesAlias::this_week};
 
+    /**
+     * Asset class, as the venue groups it. Measured on the EEA X-Perp universe
+     * 2026-08-04: 1 = crypto (66 instruments), 3 = equities and ETFs (30:
+     * AAPL, NVDA, QQQ, SPY, MSTR, ...), 4 = commodities (4: XAU, XAG, CL, BZ).
+     * The distinction is operational, not cosmetic — categories 3 and 4 follow
+     * an underlying market's session, and their liquidity collapses outside it
+     * even though the perp itself quotes and funds 24/7.
+     */
+    std::int32_t instCategory{};
+
     /// Instrument status
     InstrumentStatus state = {InstrumentStatus::live};
 
