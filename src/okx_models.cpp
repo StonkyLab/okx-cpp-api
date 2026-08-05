@@ -180,6 +180,7 @@ void Instrument::fromJson(const nlohmann::json &json) {
     readDecimalValue(json, "minSz", minSz);
     readMagicEnum<ContractType>(json, "ctType", ctType);
     readMagicEnum<FuturesAlias>(json, "alias", alias);
+    readValue<std::string>(json, "ruleType", ruleType);
     readMagicEnum<InstrumentStatus>(json, "state", state);
     readDecimalValue(json, "maxLmtSz", maxLmtSz);
     readDecimalValue(json, "maxMktSz", maxMktSz);

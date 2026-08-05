@@ -220,6 +220,16 @@ struct Instrument final : IJson {
      */
     std::int32_t instCategory{};
 
+    /**
+     * Contract rule type: "normal" for ordinary contracts, "xperp" for the
+     * USD-settled perpetual-style futures OKX lists for the EEA entity.
+     * X-Perps are FUTURES with a nominal ~2031 expiry that exists only to
+     * satisfy the regulation; economically they are linear perpetuals with
+     * funding. `instType` alone does not separate them from the 39 ordinary
+     * dated futures sharing the same endpoint.
+     */
+    std::string ruleType{};
+
     /// Instrument status
     InstrumentStatus state = {InstrumentStatus::live};
 

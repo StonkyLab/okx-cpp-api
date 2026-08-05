@@ -87,7 +87,10 @@ private:
 
 public:
     mutable RateLimiter klineLimiter{20, 2000};
-    mutable RateLimiter marketDataHistoryLimiter{1, 1000}; // 1 request per second for market-data-history (conservative)
+    /// market-data-history advertises `ratelimit-limit: 60` per second; 20 keeps
+    /// a wide margin while still letting a full-history download enumerate
+    /// hundreds of instruments in minutes rather than hours.
+    mutable RateLimiter marketDataHistoryLimiter{20, 1000};
     RESTClient *parent = nullptr;
     std::shared_ptr<HTTPSession> httpSession;
 
