@@ -74,16 +74,49 @@ std::vector<std::uint8_t> extractZip(const std::vector<std::uint8_t> &zipData) {
         throw std::runtime_error("Failed to open ZIP entry");
     }
 
-    const int32_t bytes_read = mz_zip_reader_entry_read(zipReader, result.data(), static_cast<int32_t>(result.size()));
-    if (bytes_read < 0) {
+    // mz_zip_reader_entry_read() is a STREAM read: it returns what the
+    // decompressor has ready, not the whole entry, so it has to be looped.
+    // Treating a single call's return value as the complete file truncated
+    // every archive member past the first ~116 KB — a monthly OKX candle file
+    // decompresses to several MB, so all but its first day was silently lost,
+    // and the short buffer still parsed cleanly as a valid, shorter CSV.
+    const auto expectedSize = static_cast<std::size_t>(fileInfo->uncompressed_size);
+    std::size_t totalRead = 0;
+
+    while (true) {
+        if (totalRead == result.size()) {
+            if (expectedSize > 0) {
+                break; // entry fully read
+            }
+            result.resize(result.empty() ? 1u << 20 : result.size() * 2); // size unknown, grow
+        }
+
+        const int32_t chunk = mz_zip_reader_entry_read(zipReader, result.data() + totalRead,
+                                                       static_cast<int32_t>(result.size() - totalRead));
+        if (chunk < 0) {
+            mz_zip_reader_entry_close(zipReader);
+            mz_zip_reader_close(zipReader);
+            mz_zip_reader_delete(&zipReader);
+            mz_stream_mem_delete(&memStream);
+            throw std::runtime_error("Failed to extract file from ZIP");
+        }
+        if (chunk == 0) {
+            break; // stream exhausted
+        }
+        totalRead += static_cast<std::size_t>(chunk);
+    }
+
+    result.resize(totalRead);
+
+    // A short read means truncated market data. Failing loudly is the point:
+    // the silent version of this cost the dataset months of history.
+    if (expectedSize > 0 && totalRead != expectedSize) {
         mz_zip_reader_entry_close(zipReader);
         mz_zip_reader_close(zipReader);
         mz_zip_reader_delete(&zipReader);
         mz_stream_mem_delete(&memStream);
-        throw std::runtime_error("Failed to extract file from ZIP");
+        throw std::runtime_error(fmt::format("Truncated ZIP entry: read {} of {} bytes", totalRead, expectedSize));
     }
-
-    result.resize(static_cast<size_t>(bytes_read));
 
     // Cleanup
     mz_zip_reader_entry_close(zipReader);
@@ -94,12 +127,13 @@ std::vector<std::uint8_t> extractZip(const std::vector<std::uint8_t> &zipData) {
     return result;
 }
 
-std::vector<Candle> parseCandlesCsv(const std::vector<std::uint8_t> &csvData) {
+std::vector<Candle> parseCandlesCsv(const std::vector<std::uint8_t> &csvData,
+                                    const std::string &expectedInstrumentName) {
     const std::string csvContent(reinterpret_cast<const char *>(csvData.data()), csvData.size());
-    return parseCandlesCsv(csvContent);
+    return parseCandlesCsv(csvContent, expectedInstrumentName);
 }
 
-std::vector<Candle> parseCandlesCsv(const std::string &csvContent) {
+std::vector<Candle> parseCandlesCsv(const std::string &csvContent, const std::string &expectedInstrumentName) {
     std::vector<Candle> candles;
     std::set<std::int64_t> seenTimestamps;
     std::istringstream stream(csvContent);
@@ -107,6 +141,7 @@ std::vector<Candle> parseCandlesCsv(const std::string &csvContent) {
     bool isFirstLine = true;
     int linesProcessed = 0;
     int linesSkipped = 0;
+    int linesOtherInstrument = 0;
 
     while (std::getline(stream, line)) {
         // Handle Windows line endings (remove trailing \r)
@@ -145,6 +180,15 @@ std::vector<Candle> parseCandlesCsv(const std::string &csvContent) {
             }
             linesSkipped++;
             continue; // Skip malformed lines
+        }
+
+        // A "futureschain" archive file carries every contract of the
+        // instrument family, so rows of sibling expiries must be dropped
+        // before the timestamp de-duplication below merges them into one
+        // series.
+        if (!expectedInstrumentName.empty() && fields[0] != expectedInstrumentName) {
+            linesOtherInstrument++;
+            continue;
         }
 
         linesProcessed++;
@@ -194,10 +238,14 @@ std::vector<Candle> parseCandlesCsv(const std::string &csvContent) {
             // Parse confirm flag
             candle.confirm = (fields[9] == "1" || fields[9] == "true" || fields[9] == "True");
 
-            // Skip unconfirmed candles
-            if (!candle.confirm) {
-                continue;
-            }
+            // NOT used to filter here. On the REST endpoint confirm=0 means the
+            // candle is still forming, but a bulk archive file contains nothing
+            // but long-closed bars, and OKX writes 0 in it for entire stretches
+            // of history anyway — CRV-USDT-SWAP carries 0 from 2023-09-01 to
+            // 2024-07-18, as does every other symbol in that window. Dropping
+            // those rows silently deleted ten months of the dataset. The REST
+            // path removes its own trailing unconfirmed candle separately, in
+            // RESTClient::getHistoricalPrices().
 
             // OKX ZIP files contain duplicate rows per candle - deduplicate by timestamp
             if (seenTimestamps.contains(candle.ts)) {
@@ -215,13 +263,23 @@ std::vector<Candle> parseCandlesCsv(const std::string &csvContent) {
         }
     }
 
+    // Everything filtered out means the file holds only other instruments —
+    // either the archive changed how it names them, or the wrong family was
+    // requested. Silence here would look exactly like an empty month.
+    if (candles.empty() && linesOtherInstrument > 0) {
+        spdlog::warn("parseCandlesCsv: none of the {} rows belong to {}", linesOtherInstrument,
+                     expectedInstrumentName);
+    }
+
     return candles;
 }
 
-std::vector<FundingRate> parseFundingRateCsv(const std::vector<std::uint8_t> &csvData) {
+std::vector<FundingRate> parseFundingRateCsv(const std::vector<std::uint8_t> &csvData,
+                                             const std::string &expectedInstrumentName) {
     const std::string csvContent(reinterpret_cast<const char *>(csvData.data()), csvData.size());
 
     std::vector<FundingRate> rates;
+    int linesOtherInstrument = 0;
     std::set<std::int64_t> seenTimestamps;
     std::istringstream stream(csvContent);
     std::string line;
@@ -259,6 +317,12 @@ std::vector<FundingRate> parseFundingRateCsv(const std::vector<std::uint8_t> &cs
             continue;
         }
 
+        // Same family-vs-instrument reasoning as in parseCandlesCsv
+        if (!expectedInstrumentName.empty() && fields[0] != expectedInstrumentName) {
+            linesOtherInstrument++;
+            continue;
+        }
+
         try {
             if (fields[1] == "None" || fields[1].empty()) {
                 continue;
@@ -285,6 +349,11 @@ std::vector<FundingRate> parseFundingRateCsv(const std::vector<std::uint8_t> &cs
         } catch (const std::exception &e) {
             spdlog::warn("Exception in parseFundingRateCsv: {}", e.what());
         }
+    }
+
+    if (rates.empty() && linesOtherInstrument > 0) {
+        spdlog::warn("parseFundingRateCsv: none of the {} rows belong to {}", linesOtherInstrument,
+                     expectedInstrumentName);
     }
 
     return rates;

@@ -26,24 +26,37 @@ namespace stonky::okx::utils {
 /**
  * Parse 1-minute candlestick CSV data into Candle structures CSV format: ts,o,h,l,c,vol,volCcy,volCcyQuote,confirm
  * @param csvData Raw CSV bytes (UTF-8 encoded)
+ * @param expectedInstrumentName When non-empty, keep only rows whose
+ *        `instrument_name` column matches. The bulk archive is keyed by
+ *        instrument FAMILY, not by instrument: a "futureschain" file holds
+ *        every contract of the family, and families such as BTC-USD carry
+ *        eight simultaneous expiries. Without the filter their bars would be
+ *        merged into one series by timestamp, silently mixing contracts.
  * @return Vector of Candle structures
  * @throws std::runtime_error if CSV parsing fails
  */
-[[nodiscard]] std::vector<Candle> parseCandlesCsv(const std::vector<std::uint8_t> &csvData);
+[[nodiscard]] std::vector<Candle> parseCandlesCsv(const std::vector<std::uint8_t> &csvData,
+                                                  const std::string &expectedInstrumentName = {});
 
 /**
  * Parse 1-minute candlestick CSV data from string
  * @param csvContent CSV content as string
+ * @param expectedInstrumentName See the byte-buffer overload above
  * @return Vector of Candle structures
  */
-[[nodiscard]] std::vector<Candle> parseCandlesCsv(const std::string &csvContent);
+[[nodiscard]] std::vector<Candle> parseCandlesCsv(const std::string &csvContent,
+                                                  const std::string &expectedInstrumentName = {});
 
 /**
  * Parse funding rate CSV data into FundingRate structures CSV format: instId,fundingRate,realizedRate,fundingTime
  * @param csvData Raw CSV bytes (UTF-8 encoded)
+ * @param expectedInstrumentName When non-empty, keep only rows whose
+ *        instrument column matches — same family-vs-instrument reasoning as
+ *        for candles
  * @return ector of FundingRate structures
  */
-[[nodiscard]] std::vector<FundingRate> parseFundingRateCsv(const std::vector<std::uint8_t> &csvData);
+[[nodiscard]] std::vector<FundingRate> parseFundingRateCsv(const std::vector<std::uint8_t> &csvData,
+                                                           const std::string &expectedInstrumentName = {});
 
 } // namespace stonky::okx::utils
 
