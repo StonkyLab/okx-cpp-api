@@ -199,8 +199,12 @@ std::vector<Candle> RESTClient::getHistoricalPrices(const std::string &instId, c
         const std::int64_t lastToTime = candles.back().ts;
 
         if (writer) {
-            if (!candles.back().confirm) {
-                candles.pop_back();
+            // The endpoint answers NEWEST FIRST, so the still-forming candle is
+            // at front(), not back(). Popping back() discarded the oldest — a
+            // complete, wanted candle — from every page while letting the open
+            // one through.
+            if (!candles.front().confirm) {
+                candles.erase(candles.begin());
             }
 
             writer(candles);
@@ -213,10 +217,13 @@ std::vector<Candle> RESTClient::getHistoricalPrices(const std::string &instId, c
         }
     }
 
-    /// Remove last candle if it is not valid
+    /// Drop the newest candle when it is still forming. retVal is newest-first
+    /// until the reverse below, so that candle is at front(). Writing it would
+    /// freeze a partial bar: the CSV is append-only and resumes after its last
+    /// record, so no later run can correct it.
     if (!retVal.empty()) {
-        if (!retVal.back().confirm) {
-            retVal.pop_back();
+        if (!retVal.front().confirm) {
+            retVal.erase(retVal.begin());
         }
     }
 

@@ -7,6 +7,7 @@ Copyright (c) 2025 Vitezslav Kot <vitezslav.kot@stonky.cz>, Stonky s.r.o.
 */
 
 #include "stonky/okx/okx_http_session.h"
+#include "stonky/okx/tls_verify.h"
 #include "stonky/utils/utils.h"
 #include "nlohmann/json.hpp"
 #include <boost/asio/ssl.hpp>
@@ -154,10 +155,11 @@ http::response<http::string_body> HTTPSession::P::request(
     req.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
 
     ssl::context ctx{ssl::context::sslv23_client};
-    ctx.set_default_verify_paths();
+    enableTlsPeerVerification(ctx);
 
     tcp::resolver resolver{ioc};
     ssl::stream<tcp::socket> stream{ioc, ctx};
+    stream.set_verify_callback(ssl::host_name_verification(uri));
 
     // Set SNI Hostname (many hosts need this to handshake successfully)
     if (!SSL_set_tlsext_host_name(stream.native_handle(), uri.c_str())) {
@@ -212,11 +214,14 @@ std::vector<std::uint8_t> HTTPSession::downloadBinary(const std::string &url) {
 
     // Create SSL context and connection
     ssl::context ctx{ssl::context::sslv23_client};
-    ctx.set_default_verify_paths();
+    enableTlsPeerVerification(ctx);
 
     net::io_context ioc;
     tcp::resolver resolver{ioc};
     ssl::stream<tcp::socket> stream{ioc, ctx};
+    // The archive lives on static.okx.com, not on the API host, so the
+    // certificate has to be bound to the host parsed out of the URL.
+    stream.set_verify_callback(ssl::host_name_verification(host));
 
     // Set SNI Hostname
     if (!SSL_set_tlsext_host_name(stream.native_handle(), host.c_str())) {
