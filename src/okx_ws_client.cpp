@@ -7,6 +7,7 @@ Copyright (c) 2025 Vitezslav Kot <vitezslav.kot@stonky.cz>, Stonky s.r.o.
 */
 
 #include "stonky/okx/okx_ws_client.h"
+#include "stonky/okx/tls_verify.h"
 #include <boost/beast/core.hpp>
 #include <thread>
 
@@ -36,6 +37,7 @@ struct WebSocketClient::P {
     std::function<std::string()> loginProvider;
 
     P() : ctx(boost::asio::ssl::context::sslv23_client) {
+        enableTlsPeerVerification(ctx);
     }
 };
 

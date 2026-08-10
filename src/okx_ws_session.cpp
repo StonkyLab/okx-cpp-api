@@ -12,6 +12,7 @@ Copyright (c) 2025 Vitezslav Kot <vitezslav.kot@stonky.cz>, Stonky s.r.o.
 #include "stonky/utils/json_utils.h"
 #include <nlohmann/json.hpp>
 #include <boost/asio/buffers_iterator.hpp>
+#include <boost/asio/ssl/host_name_verification.hpp>
 #include <boost/asio/strand.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/beast/core.hpp>
@@ -146,6 +147,12 @@ struct WebSocketSession::P {
         }
 
         get_lowest_layer(ws).expires_after(std::chrono::seconds(30));
+
+        // verify_peer on the shared context validates the certificate chain;
+        // bind that certificate to the endpoint requested for this session as
+        // well. The callback must be installed before the TLS handshake and
+        // before `host` is extended with the port for the WebSocket Host field.
+        ws.next_layer().set_verify_callback(boost::asio::ssl::host_name_verification(host));
 
         if (!SSL_set_tlsext_host_name(ws.next_layer().native_handle(), host.c_str())) {
             ec = boost::system::error_code(static_cast<int>(ERR_get_error()), boost::asio::error::get_ssl_category());

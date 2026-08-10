@@ -19,23 +19,28 @@ find_package(nlohmann_json CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(magic_enum REQUIRED)
 
-# Fetch minizip-ng for ZIP extraction
-include(FetchContent)
+# Prefer an installed package so a clean configuration works offline. Fetching
+# remains an explicit fallback for developer machines without minizip-ng.
+find_package(minizip-ng CONFIG QUIET)
+if (NOT TARGET MINIZIP::minizip)
+    option(OKX_FETCH_MINIZIP "Download minizip-ng when no installed package is available" ON)
+    if (NOT OKX_FETCH_MINIZIP)
+        message(FATAL_ERROR "minizip-ng not found; install it or configure with OKX_FETCH_MINIZIP=ON")
+    endif ()
 
-FetchContent_Declare(
-        minizip-ng
-        GIT_REPOSITORY https://github.com/zlib-ng/minizip-ng
-        GIT_TAG        4.0.7
-        OVERRIDE_FIND_PACKAGE
-)
+    include(FetchContent)
+    FetchContent_Declare(
+            minizip-ng
+            GIT_REPOSITORY https://github.com/zlib-ng/minizip-ng
+            GIT_TAG        4.0.7
+    )
+    set(MZ_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(MZ_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(MZ_COMPAT ON CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(minizip-ng)
+endif ()
 
-set(MZ_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(MZ_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(MZ_COMPAT ON CACHE BOOL "" FORCE)
-
-FetchContent_MakeAvailable(minizip-ng)
-
-include_directories(include stonky-cpp-common/include SYSTEM ${Boost_INCLUDE_DIR} ${OPENSSL_INCLUDE_DIR})
+include_directories(include SYSTEM ${Boost_INCLUDE_DIR} ${OPENSSL_INCLUDE_DIR})
 
 if (NOT TARGET stonky_common)
     add_subdirectory(stonky-cpp-common)

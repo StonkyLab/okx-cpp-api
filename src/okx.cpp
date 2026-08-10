@@ -111,7 +111,7 @@ bool OKX::isValidBarSize(const std::int32_t size, BarSize &barSize) {
         case 10080:
             barSize = BarSize::_1W;
             return true;
-        case 40320:
+        case 43200:
             barSize = BarSize::_1M;
             return true;
         case 120960:
