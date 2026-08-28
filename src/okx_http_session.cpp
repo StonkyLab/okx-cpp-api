@@ -15,12 +15,42 @@ Copyright (c) 2025 Vitezslav Kot <vitezslav.kot@stonky.cz>, Stonky s.r.o.
 #include "base64.h"
 #include "date.h"
 #include <openssl/hmac.h>
+#ifndef _WIN32
+#include <sys/socket.h>
+#include <sys/time.h>
+#endif
 
 namespace stonky::okx {
 namespace ssl = boost::asio::ssl;
 using tcp = net::ip::tcp;
 
 constexpr auto API_MAINNET_URI = "www.okx.com";
+
+namespace {
+/**
+ * Bound every blocking socket operation, the TLS handshake included.
+ *
+ * Without this a silently dropped connection blocks a synchronous read
+ * forever: on 2026-08-28 one download worker hung for 16 hours at 0 % CPU on
+ * a dead peer, and because the run joins every worker, the whole downloader
+ * never finished. 60 s is per read/write, not per transfer, so multi-minute
+ * archive downloads are unaffected.
+ */
+void setSocketTimeouts(tcp::socket &socket) {
+#ifdef _WIN32
+    const DWORD timeoutMs = 60000;
+    setsockopt(socket.native_handle(), SOL_SOCKET, SO_RCVTIMEO,
+               reinterpret_cast<const char *>(&timeoutMs), sizeof(timeoutMs));
+    setsockopt(socket.native_handle(), SOL_SOCKET, SO_SNDTIMEO,
+               reinterpret_cast<const char *>(&timeoutMs), sizeof(timeoutMs));
+#else
+    const timeval timeout{60, 0};
+    setsockopt(socket.native_handle(), SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+    setsockopt(socket.native_handle(), SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+#endif
+}
+} // namespace
+
 
 struct HTTPSession::P {
     net::io_context ioc;
@@ -172,6 +202,7 @@ http::response<http::string_body> HTTPSession::P::request(
 
     auto const results = resolver.resolve(uri, "443");
     net::connect(stream.next_layer(), results.begin(), results.end());
+    setSocketTimeouts(stream.next_layer());
     stream.handshake(ssl::stream_base::client);
 
     http::write(stream, req);
@@ -234,6 +265,7 @@ std::vector<std::uint8_t> HTTPSession::downloadBinary(const std::string &url) {
 
     auto const results = resolver.resolve(host, "443");
     net::connect(stream.next_layer(), results.begin(), results.end());
+    setSocketTimeouts(stream.next_layer());
     stream.handshake(ssl::stream_base::client);
 
     // Prepare GET request
