@@ -78,6 +78,21 @@ public:
      * @return True if subscribed
      */
     [[nodiscard]] bool isSubscribed(const std::string &subscriptionRequest) const;
+
+    /**
+     * Health of the CURRENT session: false when none exists or when its pong
+     * age crossed the zombie threshold (the session then hard-closes itself
+     * and the next subscribe() builds a replacement). Order-submit guards
+     * consult this so an engine never trades against a dead event stream.
+     */
+    [[nodiscard]] bool isSessionAlive() const;
+
+    /**
+     * Invoked whenever subscribe() creates a NEW session — the first connect
+     * and every rebuild after a death — before the session runs. Lets owners
+     * reset per-connection state (e.g. a private stream's auth flag).
+     */
+    void setSessionRebuiltCallback(const std::function<void()> &cb) const;
 };
 }
 

@@ -65,6 +65,12 @@ PrivateStream::PrivateStream(const std::string &apiKey, const std::string &apiSe
     /// construction would fail authentication on any later reconnect.
     m_p->wsClient->setPrivateAuth([apiKey, apiSecret, passphrase] { return loginRequestJson(apiKey, apiSecret, passphrase); });
 
+    /// The auth flag is PER CONNECTION: a rebuilt session starts
+    /// unauthenticated until the venue acks its fresh login. Without the
+    /// reset, isAlive() would report the OLD connection's auth against the
+    /// new one and an order-submit guard would open too early.
+    m_p->wsClient->setSessionRebuiltCallback([this] { m_p->authenticated = false; });
+
     m_p->wsClient->setDataEventCallback([this](const DataEvent &event) {
         if (event.channel == "orders" && m_p->orderCB) {
             m_p->orderCB(event);
@@ -107,4 +113,6 @@ void PrivateStream::subscribeOrders(const std::string &instType) const {
 }
 
 bool PrivateStream::isAuthenticated() const { return m_p->authenticated; }
+
+bool PrivateStream::isAlive() const { return m_p->wsClient->isSessionAlive() && m_p->authenticated; }
 } // namespace stonky::okx

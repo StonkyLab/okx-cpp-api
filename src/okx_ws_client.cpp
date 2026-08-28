@@ -35,6 +35,7 @@ struct WebSocketClient::P {
     onDataEvent dataEventCB;
     std::string wsPath{"/ws/v5/public"};
     std::function<std::string()> loginProvider;
+    std::function<void()> sessionRebuiltCB;
 
     P() : ctx(boost::asio::ssl::context::sslv23_client) {
         enableTlsPeerVerification(ctx);
@@ -105,15 +106,39 @@ void WebSocketClient::setPrivateAuth(const std::function<std::string()> &loginPr
 
 void WebSocketClient::subscribe(const std::string &subscriptionRequest) const {
     if (const auto session = m_p->session.lock()) {
-        session->subscribe(subscriptionRequest);
-        return;
+        /// A STALE session (no pongs — dead TCP) is a corpse: its pending
+        /// subscriptions never flush and its acked list dedups re-subscribes
+        /// into silence. It hard-closes itself on its next ping tick; routing
+        /// into it meanwhile would lose this request, so treat it as absent
+        /// and build the replacement now (2026-08-24 incident: the zombie
+        /// blocked every rebuild path for 3.5 days).
+        if (!session->isStale()) {
+            session->subscribe(subscriptionRequest);
+            return;
+        }
+        session->close();
     }
 
     const auto ws = std::make_shared<WebSocketSession>(m_p->ioContext, m_p->ctx, m_p->logMessageCB);
     std::weak_ptr wp{ws};
     m_p->session = std::move(wp);
+
+    /// Owners reset per-connection state here (a private stream's auth flag)
+    /// BEFORE the new session runs, so health checks never see the old
+    /// connection's state attributed to the new one.
+    if (m_p->sessionRebuiltCB) {
+        m_p->sessionRebuiltCB();
+    }
+
     ws->run(m_p->host, m_p->port, subscriptionRequest, m_p->dataEventCB, m_p->wsPath, m_p->loginProvider);
 }
+
+bool WebSocketClient::isSessionAlive() const {
+    const auto session = m_p->session.lock();
+    return session && !session->isStale();
+}
+
+void WebSocketClient::setSessionRebuiltCallback(const std::function<void()> &cb) const { m_p->sessionRebuiltCB = cb; }
 
 bool WebSocketClient::isSubscribed(const std::string &subscriptionRequest) const {
     if (const auto session = m_p->session.lock()) {

@@ -13,6 +13,7 @@ Copyright (c) 2026 Vitezslav Kot <vitezslav.kot@stonky.cz>, Stonky s.r.o.
 #include "stonky/okx/okx_ws_client.h"
 #include <spdlog/spdlog.h>
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <map>
 #include <mutex>
@@ -157,10 +158,46 @@ struct OkxExecutionGateway::P {
     mutable std::recursive_mutex fillsM;
     std::set<std::string> seenFills;
 
+    /// dead→alive transition dedup for guardPrivateStream's log lines.
+    std::atomic<bool> streamDeadLogged{false};
+
     [[nodiscard]] std::optional<InstrumentInfo> info(const std::string &symbol) const {
         std::lock_guard lk(instrumentsM);
         const auto it = instruments.find(symbol);
         return it == instruments.end() ? std::nullopt : std::optional{it->second};
+    }
+
+    /**
+     * Fail closed on a dead private stream (the 2026-08-24..28 incident):
+     * with the orders channel down, fills are INVISIBLE — the chase core
+     * recomputes remainders from a frozen filledQty and stacks blind
+     * overfills the venue sees but the bot does not (live-observed: MON at
+     * 1.9x its target while the chase reported "filled 0"). Submits are
+     * refused until the stream is demonstrably alive; CANCELS stay allowed —
+     * they reduce risk and need no event stream to be correct.
+     *
+     * The refusal also TRIGGERS the heal: subscribing on a stale session
+     * swaps in a fresh one (login + subscriptions replay), so a mid-chase
+     * death typically recovers within the chase's own backoff-retry loop.
+     * The "local order lane" marker makes the chase core treat the refusal
+     * as quiet local pacing: debug log, one repost-interval backoff, no
+     * fatal-cap counting — exactly the retry cadence a reconnect needs.
+     */
+    void guardPrivateStream() {
+        if (privateStream->isAlive()) {
+            if (streamDeadLogged.exchange(false)) {
+                spdlog::info("OkxExecutionGateway: private order stream recovered — submits re-enabled");
+            }
+            return;
+        }
+
+        privateStream->subscribeOrders(instType);
+
+        if (!streamDeadLogged.exchange(true)) {
+            spdlog::error("OkxExecutionGateway: private order stream dead/stale — refusing blind submits (fills would be invisible); rebuilding the session");
+        }
+
+        throw GatewayError(RejectKind::Throttled, "local order lane paused: OKX private order stream stale — submit refused until it reconnects");
     }
 
     void handleOrderEvent(const DataEvent &event) {
@@ -417,6 +454,8 @@ void OkxExecutionGateway::setQuoteCallback(const onQuoteEvent &cb) { m_p->quoteC
 
 void OkxExecutionGateway::submitPostOnlyLimit(const std::string &clientOrderId, const std::string &symbol, const OrderSide side, const double qty, const double price,
                                               const bool reduceOnly) {
+    m_p->guardPrivateStream();
+
     const auto info = m_p->info(symbol);
     if (!info) {
         throw GatewayError(RejectKind::Permanent, fmt::format("OKX: unknown instrument {}", symbol));
@@ -484,6 +523,8 @@ bool OkxExecutionGateway::cancel(const std::string &clientOrderId, const std::st
 }
 
 void OkxExecutionGateway::submitReduceOnlyMarket(const std::string &clientOrderId, const std::string &symbol, const OrderSide side, const double qty) {
+    m_p->guardPrivateStream();
+
     const auto info = m_p->info(symbol);
     if (!info) {
         throw GatewayError(RejectKind::Permanent, fmt::format("OKX: unknown instrument {}", symbol));
@@ -516,6 +557,8 @@ void OkxExecutionGateway::submitReduceOnlyMarket(const std::string &clientOrderI
 }
 
 void OkxExecutionGateway::ensureOrderStream() { m_p->privateStream->subscribeOrders(m_p->instType); }
+
+bool OkxExecutionGateway::privateStreamAlive() const { return m_p->privateStream->isAlive(); }
 
 std::string OkxExecutionGateway::instIdFor(const std::string &symbol) const {
     const auto info = m_p->info(symbol);

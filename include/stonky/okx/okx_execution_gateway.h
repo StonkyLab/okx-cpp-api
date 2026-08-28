@@ -87,6 +87,15 @@ public:
      */
     void ensureOrderStream();
 
+    /**
+     * True while the private order stream's CURRENT connection is alive
+     * (pongs flowing) and authenticated. While false, submits are refused
+     * fail-closed (see the incident note on the submit guard) — strategy
+     * code can use this to skip a cycle and page the operator instead of
+     * discovering the outage through refused legs.
+     */
+    [[nodiscard]] bool privateStreamAlive() const;
+
     /// Resolve a base symbol to the venue instId, for callers that must talk to
     /// REST directly (position/funding queries). Empty when unknown.
     [[nodiscard]] std::string instIdFor(const std::string &symbol) const;

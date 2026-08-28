@@ -7,6 +7,7 @@ Copyright (c) 2025 Vitezslav Kot <vitezslav.kot@stonky.cz>, Stonky s.r.o.
 */
 
 #include "stonky/okx/okx_ws_session.h"
+#include <atomic>
 #include <deque>
 #include "stonky/utils/log_utils.h"
 #include "stonky/utils/json_utils.h"
@@ -22,6 +23,11 @@ Copyright (c) 2025 Vitezslav Kot <vitezslav.kot@stonky.cz>, Stonky s.r.o.
 
 namespace stonky::okx {
 static constexpr int PING_INTERVAL_IN_S = 20;
+/// Pong age past which a session is a ZOMBIE (dead TCP, pending read hanging
+/// forever) and hard-closes itself so its owner can rebuild it. Three missed
+/// ping intervals: long enough to ride out venue hiccups, short enough that
+/// an execution engine is never blind for more than about a minute.
+static constexpr double STALE_AFTER_S = 3.0 * PING_INTERVAL_IN_S;
 
 struct WebSocketSession::P {
     boost::asio::ip::tcp::resolver resolver;
@@ -46,7 +52,21 @@ struct WebSocketSession::P {
     boost::asio::steady_timer pingTimer;
     std::chrono::time_point<std::chrono::system_clock> lastPingTime{};
     std::chrono::time_point<std::chrono::system_clock> lastPongTime{};
+    /// Pong bookkeeping for zombie detection, readable from OUTSIDE the io
+    /// thread (health checks): ms since epoch, 0 = not yet.
+    std::atomic<std::int64_t> lastPongMs{0};
+    std::atomic<std::int64_t> connectedAtMs{0};
+    bool staleClosed{false};
     mutable std::recursive_mutex subscriptionLocker;
+
+    [[nodiscard]] double secondsSinceLastPong() const {
+        const auto base = std::max(lastPongMs.load(), connectedAtMs.load());
+        if (base == 0) {
+            return 0.0; /// still resolving/connecting — that phase has its own 30 s expiry
+        }
+        const auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+        return static_cast<double>(nowMs - base) / 1000.0;
+    }
 
     P(boost::asio::io_context &ioc, boost::asio::ssl::context &ctx, onLogMessage onLogMessageCB) :
         resolver(make_strand(ioc)), ws(make_strand(ioc), ctx), logMessageCB(std::move(onLogMessageCB)), pingTimer(ioc, boost::asio::chrono::seconds(PING_INTERVAL_IN_S)) {}
@@ -174,6 +194,7 @@ struct WebSocketSession::P {
 
             if (kind == boost::beast::websocket::frame_type::pong) {
                 lastPongTime = std::chrono::system_clock::now();
+                lastPongMs = std::chrono::duration_cast<std::chrono::milliseconds>(lastPongTime.time_since_epoch()).count();
             }
         });
 
@@ -191,6 +212,8 @@ struct WebSocketSession::P {
         if (ec) {
             return logMessageCB(LogSeverity::Error, fmt::format("{}: {}", MAKE_FILELINE, ec.message()));
         }
+
+        connectedAtMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 
         pingTimer.async_wait([this, self](const boost::system::error_code &e) { onPingTimer(self, e); });
 
@@ -275,9 +298,30 @@ struct WebSocketSession::P {
         }
     }
 
-    void ping() {
-        if (const std::chrono::duration<double> elapsed = lastPingTime - lastPongTime; elapsed.count() > PING_INTERVAL_IN_S) {
-            logMessageCB(LogSeverity::Warning, fmt::format("{}: {}", MAKE_FILELINE, "ping expired"));
+    /// @return false when the session stale-closed itself — the ping timer
+    ///         must not be re-armed, so the async chain can unwind and drop
+    ///         the last self reference.
+    [[nodiscard]] bool ping() {
+        /// Zombie detection (the 2026-08-24..28 incident): a dead TCP leaves
+        /// the pending async_read hanging forever — is_open() still true,
+        /// async_ping still "succeeds" locally, pongs never arrive — while the
+        /// owner's weak_ptr keeps routing subscriptions into the corpse, so
+        /// the rebuild-on-next-subscribe machinery never engages. The old
+        /// check (lastPing − lastPong) merely LOGGED "ping expired" every
+        /// 20 s; the live bot did that 4320×/day for 3.5 days while trading
+        /// blind. Age is measured against the wall clock (lastPingTime
+        /// freezes when pings stop succeeding), and a stale session HARD-
+        /// closes its transport: pending ops error out, the async chain drops
+        /// the last self reference, the session destructs, and the owning
+        /// client's next subscribe() builds a fresh one (login and
+        /// subscriptions replay by design).
+        if (const double age = secondsSinceLastPong(); age > STALE_AFTER_S) {
+            staleClosed = true;
+            logMessageCB(LogSeverity::Error, fmt::format("{}: no pong for {:.0f} s — closing zombie session for rebuild", MAKE_FILELINE, age));
+            get_lowest_layer(ws).close();
+            return false; /// caller must NOT re-arm the ping timer — the chain must die
+        } else if (age > PING_INTERVAL_IN_S) {
+            logMessageCB(LogSeverity::Warning, fmt::format("{}: pong overdue ({:.0f} s)", MAKE_FILELINE, age));
         }
 
         if (ws.is_open()) {
@@ -290,6 +334,8 @@ struct WebSocketSession::P {
                 }
             });
         }
+
+        return true;
     }
 
     void closeWs() {
@@ -309,7 +355,10 @@ struct WebSocketSession::P {
             return logMessageCB(LogSeverity::Error, fmt::format("{}: {}", MAKE_FILELINE, ec.message()));
         }
 
-        ping();
+        if (!ping()) {
+            return; /// stale-closed: dropping self here lets the session destruct
+        }
+
         pingTimer.expires_after(boost::asio::chrono::seconds(PING_INTERVAL_IN_S));
         pingTimer.async_wait([this, self](const boost::system::error_code &e) { onPingTimer(self, e); });
     }
@@ -339,6 +388,10 @@ WebSocketSession::~WebSocketSession() {
 void WebSocketSession::subscribe(const std::string &subscriptionRequest) const { m_p->writeSubscriptionRequest(subscriptionRequest); }
 
 bool WebSocketSession::isSubscribed(const std::string &subscriptionRequest) const { return m_p->isSubscribed(subscriptionRequest); }
+
+double WebSocketSession::secondsSinceLastPong() const { return m_p->secondsSinceLastPong(); }
+
+bool WebSocketSession::isStale() const { return m_p->secondsSinceLastPong() > STALE_AFTER_S; }
 
 void WebSocketSession::run(const std::string &host, const std::string &port, const std::string &subscriptionRequest, const onDataEvent &dataEventCB,
                            const std::string &path, const std::function<std::string()> &loginProvider) {

@@ -60,6 +60,15 @@ public:
 
     /// True once the venue acknowledged the login.
     [[nodiscard]] bool isAuthenticated() const;
+
+    /**
+     * True only while the CURRENT connection is both alive (pongs flowing —
+     * not a dead-TCP zombie) and authenticated. isAuthenticated() alone is
+     * sticky across a death; this is the health an order-submit guard needs:
+     * with the orders channel down, fills are invisible and any submit is a
+     * blind one.
+     */
+    [[nodiscard]] bool isAlive() const;
 };
 } // namespace stonky::okx
 

@@ -64,6 +64,21 @@ public:
      * @return True if subscribed
      */
     [[nodiscard]] bool isSubscribed(const std::string &subscriptionRequest) const;
+
+    /**
+     * Seconds since the venue's last pong on THIS connection (from the
+     * handshake while none arrived yet; 0.0 before the handshake — the
+     * connect phase has its own 30 s expiry). A dead-TCP zombie shows a
+     * growing age while the socket still reads open. Thread-safe.
+     */
+    [[nodiscard]] double secondsSinceLastPong() const;
+
+    /**
+     * True when the pong age exceeds the zombie threshold. Such a session
+     * hard-closes itself on its next ping tick; owners should treat it as
+     * dead immediately (health checks, order-submit guards).
+     */
+    [[nodiscard]] bool isStale() const;
 };
 } // namespace stonky::okx
 #endif // INCLUDE_STONKY_OKX_WS_SESSION_H
