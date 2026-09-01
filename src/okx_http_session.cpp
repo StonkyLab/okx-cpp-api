@@ -17,6 +17,8 @@ Copyright (c) 2025 Vitezslav Kot <vitezslav.kot@stonky.cz>, Stonky s.r.o.
 #include <openssl/hmac.h>
 #ifndef _WIN32
 #include <sys/socket.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <sys/time.h>
 #endif
 
@@ -28,13 +30,24 @@ constexpr auto API_MAINNET_URI = "www.okx.com";
 
 namespace {
 /**
- * Bound every blocking socket operation, the TLS handshake included.
+ * Bound a blocking socket operation against a peer that has gone away.
  *
- * Without this a silently dropped connection blocks a synchronous read
- * forever: on 2026-08-28 one download worker hung for 16 hours at 0 % CPU on
- * a dead peer, and because the run joins every worker, the whole downloader
- * never finished. 60 s is per read/write, not per transfer, so multi-minute
- * archive downloads are unaffected.
+ * On 2026-08-28 one download worker hung for 16 hours at 0 % CPU on a dead
+ * peer, and because the run joins every worker the whole downloader never
+ * finished.
+ *
+ * SO_RCVTIMEO alone does not fix that on POSIX: a timed-out recv reports
+ * EAGAIN, which Asio's synchronous path cannot tell from a non-blocking
+ * would-block, so it polls with no deadline and waits anyway. It is kept
+ * because it does bound the call on Windows, where the same condition arrives
+ * as WSAETIMEDOUT.
+ *
+ * What bounds it on Linux is the kernel giving up on the connection itself:
+ * keepalive probes on an idle socket and TCP_USER_TIMEOUT on unacknowledged
+ * data both end in ETIMEDOUT, a real error that the synchronous read reports
+ * instead of blocking. The settings below tear a silent connection down after
+ * roughly a minute; both are per connection, not per transfer, so a
+ * multi-minute archive download that keeps flowing is unaffected.
  */
 void setSocketTimeouts(tcp::socket &socket) {
 #ifdef _WIN32
@@ -47,6 +60,22 @@ void setSocketTimeouts(tcp::socket &socket) {
     const timeval timeout{60, 0};
     setsockopt(socket.native_handle(), SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
     setsockopt(socket.native_handle(), SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+
+    const int handle = socket.native_handle();
+    constexpr int enable = 1;
+    setsockopt(handle, SOL_SOCKET, SO_KEEPALIVE, &enable, sizeof(enable));
+#ifdef TCP_KEEPIDLE
+    constexpr int idleSeconds = 30;
+    constexpr int probeIntervalSeconds = 10;
+    constexpr int probeCount = 3;
+    setsockopt(handle, IPPROTO_TCP, TCP_KEEPIDLE, &idleSeconds, sizeof(idleSeconds));
+    setsockopt(handle, IPPROTO_TCP, TCP_KEEPINTVL, &probeIntervalSeconds, sizeof(probeIntervalSeconds));
+    setsockopt(handle, IPPROTO_TCP, TCP_KEEPCNT, &probeCount, sizeof(probeCount));
+#endif
+#ifdef TCP_USER_TIMEOUT
+    constexpr unsigned int unackedMs = 60000;
+    setsockopt(handle, IPPROTO_TCP, TCP_USER_TIMEOUT, &unackedMs, sizeof(unackedMs));
+#endif
 #endif
 }
 } // namespace
